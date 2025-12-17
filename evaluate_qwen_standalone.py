@@ -2,6 +2,7 @@
 """
 Qwen2.5-Coder-7B-Instruct 微调模型测评脚本
 专门用于函数名推测任务的准确率评估
+集成 Dependency-Aware Semantic Propagation (CASP) 功能
 """
 import os
 import json
@@ -13,6 +14,7 @@ from datetime import datetime
 from typing import List, Dict, Any, Optional
 import re
 import difflib
+import csv
 
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from peft import PeftModel
@@ -23,6 +25,100 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+class GlobalSymbolTable:
+    """全局符号表，用于管理地址到函数名的映射并支持持久化"""
+    def __init__(self, output_dir: str):
+        self.symbol_map = {}  # Address (hex string without 0x) -> Function Name
+        self.output_csv = os.path.join(output_dir, "global_symbol_table.csv")
+        self.headers = ["Address", "Resolved Name"]
+        
+        # 初始化CSV文件
+        with open(self.output_csv, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(self.headers)
+            
+    def update(self, address: str, name: str):
+        """更新符号表"""
+        # 规范化地址格式：移除0x前缀，转大写，确保一致性
+        if not address:
+            return
+            
+        norm_addr = address.replace("0x", "").replace("0X", "").upper()
+        self.symbol_map[norm_addr] = name
+        
+        # 追加到CSV
+        with open(self.output_csv, 'a', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow([f"0x{norm_addr}", name])
+            
+    def resolve_context(self, text: str) -> str:
+        """
+        在文本中进行语义传播：将已知的 sub_XXXX 替换为解析出的函数名
+        """
+        if not self.symbol_map or not text:
+            return text
+            
+        # 查找所有 sub_XXXX 模式
+        # 假设 sub_ 后跟十六进制地址
+        def replace_match(match):
+            addr_str = match.group(1).upper()
+            if addr_str in self.symbol_map:
+                return self.symbol_map[addr_str]
+            return match.group(0)
+            
+        # 匹配 sub_ + 16进制字符
+        pattern = r'\b(?:sub_|func_|loc_)([0-9A-Fa-f]+)\b'
+        resolved_text = re.sub(pattern, replace_match, text)
+        
+        return resolved_text
+
+class SRSCalculator:
+    """Semantic Richness Score (SRS) 计算器"""
+    
+    @staticmethod
+    def calculate_srs(example: Dict) -> float:
+        """
+        SRS(f) = alpha * N_str + beta * N_api + gamma * Depth
+        alpha=2.0, beta=1.0, gamma=0.5
+        """
+        alpha = 2.0
+        beta = 1.0
+        gamma = 0.5
+        
+        # 1. 获取字符串数量 (N_str)
+        n_str = 0
+        if 'internal_strings' in example:
+            n_str = len(example['internal_strings'])
+        elif 'string_arguments' in example: 
+             # 如果没有internal_strings，尝试用string_arguments作为代理
+            n_str = len(example['string_arguments'])
+            
+        # 2. 获取API调用数量 (N_api)
+        n_api = 0
+        # 尝试从 function_body 中估算 API 调用
+        # 简单统计 sub_ 或者常见 API 模式
+        body = example.get('function_body', '')
+        if body:
+            # 统计函数调用 pattern: name(...)
+            calls = re.findall(r'\b\w+\s*\(', body)
+            # 排除控制流关键字
+            keywords = {'if', 'while', 'for', 'switch', 'return', 'sizeof'}
+            n_api = sum(1 for c in calls if c.split('(')[0].strip() not in keywords)
+            
+        # 3. 获取调用深度 (Depth)
+        depth = 0
+        if 'call_chain' in example:
+            chains = example['call_chain']
+            if chains and isinstance(chains, list):
+                # 假设 call_chain 是链的列表，取最大长度
+                # 链可能是 ["main", "sub_1", "sub_2"]
+                lengths = [len(c) for c in chains if isinstance(c, list)]
+                if lengths:
+                    depth = max(lengths)
+        
+        srs = alpha * n_str + beta * n_api + gamma * depth
+        return srs
 
 class SimpleEvaluationMetrics:
     """简化的评估指标计算类"""
@@ -329,6 +425,8 @@ class QwenTestFramework:
             for message in reversed(example["messages"]):
                 if message.get("role") == "assistant":
                     return message.get("content", "").strip()
+            # 如果没有找到assistant回复，可能是inference-only数据
+            return ""
         elif "output" in example:
             # 处理instruction/input/output格式
             return example.get("output", "").strip()
@@ -354,42 +452,81 @@ class QwenTestFramework:
             
         os.makedirs(output_dir, exist_ok=True)
         
+        # 初始化全局符号表
+        symbol_table = GlobalSymbolTable(output_dir)
+        
+        # 1. SRS 排序 (Dependency-Aware Scheduling)
+        logger.info("Calculating SRS for dependency-aware scheduling...")
+        data_with_srs = []
+        for item in test_data:
+            srs = SRSCalculator.calculate_srs(item)
+            data_with_srs.append((srs, item))
+            
+        # 按SRS降序排序
+        data_with_srs.sort(key=lambda x: x[0], reverse=True)
+        sorted_test_data = [item for _, item in data_with_srs]
+        
+        logger.info(f"Sorted {len(sorted_test_data)} examples by SRS.")
+        
         results = []
         predictions = []
         ground_truths = []
         
-        logger.info(f"Starting evaluation on {len(test_data)} examples...")
+        logger.info(f"Starting evaluation on {len(sorted_test_data)} examples...")
         
-        for i, example in enumerate(test_data):
+        for i, example in enumerate(sorted_test_data):
             if i % 50 == 0:
-                logger.info(f"Processing {i}/{len(test_data)} examples...")
+                logger.info(f"Processing {i}/{len(sorted_test_data)} examples...")
                 
             instruction, user_input = self.extract_user_prompt(example)
             ground_truth = self.extract_ground_truth(example)
             
-            if not user_input or not ground_truth:
+            # 如果没有ground truth (纯推理模式)，也不跳过
+            # if not user_input or not ground_truth:
+            if not user_input:
                 continue
+            
+            # 2. 语义传播: 更新上下文 (Dynamic Enrichment)
+            enriched_input = symbol_table.resolve_context(user_input)
                 
             # 生成预测
             try:
-                prediction = model_evaluator.generate_function_name(user_input, instruction=instruction)
+                prediction = model_evaluator.generate_function_name(enriched_input, instruction=instruction)
                 predictions.append(prediction)
                 ground_truths.append(ground_truth)
                 
-                # 计算相似度
-                similarity_score = self.metrics.similarity_score(prediction, ground_truth)
+                # 3. 更新符号表 (Semantic Propagation)
+                # 尝试从example中获取地址
+                func_ea = example.get('func_ea')
+                if not func_ea:
+                    # 如果没有直接的key，尝试从dummy_name或user_input中正则提取
+                    # 假设dummy_name是 sub_XXXX
+                    dummy = example.get('dummy_name', '')
+                    match = re.search(r'sub_([0-9A-Fa-f]+)', dummy)
+                    if match:
+                        func_ea = match.group(1)
                 
-                # 精确匹配
-                exact_match = prediction.strip().lower() == ground_truth.strip().lower()
+                if func_ea and prediction:
+                    symbol_table.update(func_ea, prediction)
+                
+                # 计算相似度 (如果有ground truth)
+                similarity_score = 0.0
+                exact_match = False
+                if ground_truth:
+                    similarity_score = self.metrics.similarity_score(prediction, ground_truth)
+                    exact_match = prediction.strip().lower() == ground_truth.strip().lower()
                 
                 result = {
                     "index": i,
+                    "srs_score": data_with_srs[i][0], # 记录SRS
                     "instruction": instruction,
                     "user_input": user_input[:200] + "..." if len(user_input) > 200 else user_input,
+                    "enriched_input": enriched_input[:200] + "..." if len(enriched_input) > 200 else enriched_input,
                     "ground_truth": ground_truth,
                     "prediction": prediction,
                     "exact_match": exact_match,
-                    "similarity_score": similarity_score
+                    "similarity_score": similarity_score,
+                    "func_ea": func_ea
                 }
                 
                 results.append(result)
@@ -407,10 +544,22 @@ class QwenTestFramework:
         avg_similarity = np.mean(similarity_scores) if similarity_scores else 0
         median_similarity = np.median(similarity_scores) if similarity_scores else 0
         
-        # 计算额外的评估指标
-        avg_sim_metric = self.metrics.average_similarity(predictions, ground_truths)
-        norm_edit_distance = self.metrics.normalized_edit_distance(predictions, ground_truths)
-        subtoken_res = self.metrics.subtoken_metrics(predictions, ground_truths)
+        # 计算额外的评估指标 (只对有GT的数据)
+        if ground_truths and any(ground_truths):
+            valid_preds = [p for p, g in zip(predictions, ground_truths) if g]
+            valid_gts = [g for g in ground_truths if g]
+            if valid_gts:
+                avg_sim_metric = self.metrics.average_similarity(valid_preds, valid_gts)
+                norm_edit_distance = self.metrics.normalized_edit_distance(valid_preds, valid_gts)
+                subtoken_res = self.metrics.subtoken_metrics(valid_preds, valid_gts)
+            else:
+                 subtoken_res = {"precision": 0, "recall": 0, "f1": 0}
+                 avg_sim_metric = 0
+                 norm_edit_distance = 0
+        else:
+            subtoken_res = {"precision": 0, "recall": 0, "f1": 0}
+            avg_sim_metric = 0
+            norm_edit_distance = 0
         
         summary = {
             "model_path": model_evaluator.model_path,
@@ -448,7 +597,7 @@ class QwenTestFramework:
         report_path = os.path.join(output_dir, "evaluation_report.md")
         
         with open(report_path, "w", encoding="utf-8") as f:
-            f.write("# Qwen2.5-Coder-7B-Instruct 函数名推测评估报告\n\n")
+            f.write("# Qwen2.5-Coder-7B-Instruct 函数名推测评估报告 (Context-Aware)\n\n")
             f.write(f"**评估时间**: {summary['evaluation_time']}\n")
             f.write(f"**模型路径**: {summary['model_path']}\n\n")
             
@@ -485,6 +634,7 @@ class QwenTestFramework:
             success_cases = [r for r in results if r["exact_match"]][:5]
             for i, case in enumerate(success_cases, 1):
                 f.write(f"**示例 {i}**:\n")
+                f.write(f"- SRS: {case['srs_score']}\n")
                 f.write(f"- 标准答案: `{case['ground_truth']}`\n")
                 f.write(f"- 模型预测: `{case['prediction']}`\n")
                 f.write(f"- 相似度: {case['similarity_score']:.4f}\n\n")
@@ -493,6 +643,7 @@ class QwenTestFramework:
             high_sim_cases = [r for r in results if not r["exact_match"] and r["similarity_score"] >= 0.8][:5]
             for i, case in enumerate(high_sim_cases, 1):
                 f.write(f"**示例 {i}**:\n")
+                f.write(f"- SRS: {case['srs_score']}\n")
                 f.write(f"- 标准答案: `{case['ground_truth']}`\n")
                 f.write(f"- 模型预测: `{case['prediction']}`\n")
                 f.write(f"- 相似度: {case['similarity_score']:.4f}\n\n")
@@ -501,6 +652,7 @@ class QwenTestFramework:
             failed_cases = [r for r in results if r["similarity_score"] < 0.5][:5]
             for i, case in enumerate(failed_cases, 1):
                 f.write(f"**示例 {i}**:\n")
+                f.write(f"- SRS: {case['srs_score']}\n")
                 f.write(f"- 标准答案: `{case['ground_truth']}`\n")
                 f.write(f"- 模型预测: `{case['prediction']}`\n")
                 f.write(f"- 相似度: {case['similarity_score']:.4f}\n\n")
