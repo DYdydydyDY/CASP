@@ -1,0 +1,68 @@
+# CASP Configuration Example
+
+# Model Configuration
+model:
+  base_model_path: "/root/project/finetune/qwen_new/Qwen2.5-Coder-7B-Instruct"
+  lora_adapter_path: null  # Set to your LoRA adapter path if using fine-tuned model
+  use_lora: false
+  max_seq_length: 4096
+  max_new_tokens: 64
+  temperature: 0.1
+  top_p: 0.9
+  top_k: 50
+  repetition_penalty: 1.05
+  device: "cuda"
+  dtype: "bfloat16"
+  system_prompt: |
+    You are a reverse engineering expert specializing in binary analysis and function name recovery.
+    Your task is to analyze stripped binary functions and infer meaningful, descriptive function names.
+
+# Feature Extraction Configuration
+feature_extraction:
+  min_func_size: 10
+  decompilation_timeout: 300
+  context_lines: 8
+  asm_context_window: 15
+  decompiled_context_lines: 20
+  max_call_depth: 5
+  max_callers: 50
+  max_chains: 8
+  min_string_length: 3
+  max_string_length: 300
+  arg_search_range: 30
+  filter_dummy_functions: true
+  filter_thunks: true
+
+# Semantic Richness Score Configuration
+srs:
+  alpha: 2.0  # String count weight
+  beta: 1.0   # API call count weight
+  gamma: 0.5  # Call depth weight
+  chain_semantic_weight: 5
+  chain_length_weight: 10
+
+# Propagation Configuration
+propagation:
+  enable_propagation: true
+  symbol_table_csv: "global_symbol_table.csv"
+  min_confidence_threshold: 0.3
+  update_strategy: "greedy"
+
+# Evaluation Configuration
+evaluation:
+  compute_exact_match: true
+  compute_subtoken_metrics: true
+  compute_similarity: true
+  compute_edit_distance: true
+  sample_size: null  # Set to a number to sample data
+  random_seed: 42
+
+# IDA Configuration (for feature extraction)
+ida:
+  ida_path: "D:\\software\\IDA\\IDA_new\\ida.exe"
+  ida_script: "ida_feature_extractor.py"
+  batch_timeout: 300
+
+# Logging Configuration
+log_level: "INFO"
+log_file: null  # Set to a path to enable file logging

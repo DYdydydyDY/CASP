@@ -1,0 +1,295 @@
+{
+  "func_ea": "0x401000",
+  "dummy_name": "sub_401000",
+  "function_body": "int sub_401000(char *password)\n{\n  int result;\n  \n  if ( strcmp(password, \"admin123\") )\n  {\n    result = 0;\n  }\n  else\n  {\n    puts(\"Access Granted\");\n    result = 1;\n  }\n  return result;\n}",
+  "caller_context": [
+    {
+      "caller_ea": "0x402000",
+      "caller_function": "sub_402000",
+      "call_site_ea": "0x40201A",
+      "context_asm": [
+        "00402010: lea     rdi, [input_buffer]",
+        "00402017: call    get_user_input",
+        "0040201A: >>> call    sub_401000 <<<",
+        "0040201F: test    eax, eax",
+        "00402021: jz      short access_denied"
+      ],
+      "context_decompiled": [
+        "void sub_402000()",
+        "{",
+        "  get_user_input(input_buffer);",
+        "  if ( sub_401000(input_buffer) )",
+        "  {",
+        "    open_admin_panel();",
+        "  }",
+        "  else",
+        "  {",
+        "    show_error(\"Access Denied\");",
+        "  }",
+        "}"
+      ],
+      "string_arguments": [],
+      "constant_arguments": []
+    }
+  ],
+  "call_chain": [
+    ["main", "login_handler", "sub_401000"],
+    ["main", "admin_menu", "sub_402000", "sub_401000"]
+  ],
+  "string_arguments": [
+    {
+      "value": "Access Granted",
+      "address": "0x404000",
+      "instruction_ea": "0x401015",
+      "instruction": "lea rdi, aAccessGranted"
+    },
+    {
+      "value": "admin123",
+      "address": "0x404020",
+      "instruction_ea": "0x401008",
+      "instruction": "lea rsi, aAdmin123"
+    }
+  ],
+  "constant_arguments": [],
+  "internal_strings": ["Access Granted", "admin123"],
+  "caller_count": 1,
+  "caller_functions": ["sub_402000"],
+  "has_decompiled": true,
+  "real_name": "verify_admin_password"
+}
+{
+  "func_ea": "0x402000",
+  "dummy_name": "sub_402000",
+  "function_body": "void sub_402000()\n{\n  char input_buffer[256];\n  \n  get_user_input(input_buffer);\n  if ( verify_admin_password(input_buffer) )\n  {\n    open_admin_panel();\n  }\n  else\n  {\n    show_error(\"Access Denied\");\n  }\n}",
+  "caller_context": [
+    {
+      "caller_ea": "0x403000",
+      "caller_function": "main",
+      "call_site_ea": "0x40305C",
+      "context_asm": [
+        "00403050: call    show_login_screen",
+        "00403055: mov     edi, 1",
+        "0040305A: call    set_admin_mode",
+        "0040305C: >>> call    sub_402000 <<<",
+        "00403061: test    eax, eax"
+      ],
+      "context_decompiled": [
+        "int main()",
+        "{",
+        "  show_login_screen();",
+        "  set_admin_mode(1);",
+        "  sub_402000();",
+        "  return 0;",
+        "}"
+      ],
+      "string_arguments": [],
+      "constant_arguments": []
+    }
+  ],
+  "call_chain": [
+    ["main", "sub_402000"],
+    ["main", "admin_menu", "sub_402000"]
+  ],
+  "string_arguments": [
+    {
+      "value": "Access Denied",
+      "address": "0x404040",
+      "instruction_ea": "0x40202C",
+      "instruction": "lea rdi, aAccessDenied"
+    }
+  ],
+  "constant_arguments": [],
+  "internal_strings": ["Access Denied"],
+  "caller_count": 1,
+  "caller_functions": ["main"],
+  "has_decompiled": true,
+  "real_name": "do_admin_login"
+}
+{
+  "func_ea": "0x403500",
+  "dummy_name": "sub_403500",
+  "function_body": "int sub_403500(const char *filename)\n{\n  FILE *fp;\n  char buffer[1024];\n  \n  fp = fopen(filename, \"r\");\n  if ( !fp )\n  {\n    perror(\"Failed to open file\");\n    return -1;\n  }\n  while ( fgets(buffer, 1024, fp) )\n  {\n    process_config_line(buffer);\n  }\n  fclose(fp);\n  return 0;\n}",
+  "caller_context": [
+    {
+      "caller_ea": "0x403000",
+      "caller_function": "main",
+      "call_site_ea": "0x403045",
+      "context_asm": [
+        "00403040: lea     rdi, aConfigTxt",
+        "00403045: >>> call    sub_403500 <<<",
+        "0040304A: test    eax, eax",
+        "0040304C: js      exit_error"
+      ],
+      "context_decompiled": [
+        "int main()",
+        "{",
+        "  if ( sub_403500(\"config.txt\") < 0 )",
+        "  {",
+        "    exit_error();",
+        "  }",
+        "}"
+      ],
+      "string_arguments": [
+        {
+          "value": "config.txt",
+          "address": "0x404100",
+          "instruction_ea": "0x403040",
+          "instruction": "lea rdi, aConfigTxt"
+        }
+      ],
+      "constant_arguments": []
+    }
+  ],
+  "call_chain": [
+    ["main", "sub_403500"]
+  ],
+  "string_arguments": [
+    {
+      "value": "Failed to open file",
+      "address": "0x404120",
+      "instruction_ea": "0x403515",
+      "instruction": "lea rdi, aFailedToOpen"
+    },
+    {
+      "value": "config.txt",
+      "address": "0x404100",
+      "instruction_ea": "0x403040",
+      "instruction": "lea rdi, aConfigTxt"
+    }
+  ],
+  "constant_arguments": [
+    {
+      "value": 1024,
+      "hex": "0x400",
+      "instruction_ea": "0x403520"
+    }
+  ],
+  "internal_strings": ["Failed to open file", "r"],
+  "caller_count": 1,
+  "caller_functions": ["main"],
+  "has_decompiled": true,
+  "real_name": "load_config_file"
+}
+{
+  "func_ea": "0x404000",
+  "dummy_name": "sub_404000",
+  "function_body": "void sub_404000(unsigned char *data, int len, unsigned char key)\n{\n  int i;\n  \n  for ( i = 0; i < len; ++i )\n    data[i] ^= key;\n}",
+  "caller_context": [
+    {
+      "caller_ea": "0x405000",
+      "caller_function": "sub_405000",
+      "call_site_ea": "0x405028",
+      "context_asm": [
+        "00405020: mov     edx, 0AAh",
+        "00405025: mov     esi, buffer_size",
+        "00405028: >>> call    sub_404000 <<<",
+        "0040502D: lea     rdi, aDecrypted"
+      ],
+      "context_decompiled": [
+        "void sub_405000()",
+        "{",
+        "  sub_404000(encrypted_buffer, buffer_size, 0xAA);",
+        "  puts(\"Decrypted successfully\");",
+        "}"
+      ],
+      "string_arguments": [
+        {
+          "value": "Decrypted successfully",
+          "address": "0x404200",
+          "instruction_ea": "0x40502D",
+          "instruction": "lea rdi, aDecrypted"
+        }
+      ],
+      "constant_arguments": [
+        {
+          "value": 170,
+          "hex": "0xaa",
+          "instruction_ea": "0x405020"
+        }
+      ]
+    }
+  ],
+  "call_chain": [
+    ["main", "decrypt_payload", "sub_404000"]
+  ],
+  "string_arguments": [
+    {
+      "value": "Decrypted successfully",
+      "address": "0x404200",
+      "instruction_ea": "0x40502D",
+      "instruction": "lea rdi, aDecrypted"
+    }
+  ],
+  "constant_arguments": [],
+  "internal_strings": [],
+  "caller_count": 1,
+  "caller_functions": ["sub_405000"],
+  "has_decompiled": true,
+  "real_name": "xor_decrypt_buffer"
+}
+{
+  "func_ea": "0x406000",
+  "dummy_name": "sub_406000",
+  "function_body": "int sub_406000(const char *hostname, int port)\n{\n  int sockfd;\n  struct sockaddr_in server_addr;\n  \n  sockfd = socket(AF_INET, SOCK_STREAM, 0);\n  if ( sockfd < 0 )\n  {\n    perror(\"Socket creation failed\");\n    return -1;\n  }\n  \n  server_addr.sin_family = AF_INET;\n  server_addr.sin_port = htons(port);\n  inet_pton(AF_INET, hostname, &server_addr.sin_addr);\n  \n  if ( connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0 )\n  {\n    perror(\"Connection failed\");\n    close(sockfd);\n    return -1;\n  }\n  \n  return sockfd;\n}",
+  "caller_context": [
+    {
+      "caller_ea": "0x407000",
+      "caller_function": "sub_407000",
+      "call_site_ea": "0x407015",
+      "context_asm": [
+        "00407010: mov     esi, 8080",
+        "00407015: >>> call    sub_406000 <<<",
+        "0040701A: mov     [rbp+sockfd], eax"
+      ],
+      "context_decompiled": [
+        "void sub_407000()",
+        "{",
+        "  int sockfd;",
+        "  sockfd = sub_406000(\"192.168.1.1\", 8080);",
+        "  if ( sockfd >= 0 )",
+        "  {",
+        "    send_request(sockfd);",
+        "  }",
+        "}"
+      ],
+      "string_arguments": [
+        {
+          "value": "192.168.1.1",
+          "address": "0x404300",
+          "instruction_ea": "0x40700C",
+          "instruction": "lea rdi, aIpAddress"
+        }
+      ],
+      "constant_arguments": [
+        {
+          "value": 8080,
+          "hex": "0x1f90",
+          "instruction_ea": "0x407010"
+        }
+      ]
+    }
+  ],
+  "call_chain": [
+    ["main", "network_handler", "sub_407000", "sub_406000"]
+  ],
+  "string_arguments": [
+    {
+      "value": "Socket creation failed",
+      "address": "0x404320",
+      "instruction_ea": "0x406018",
+      "instruction": "lea rdi, aSocketFailed"
+    },
+    {
+      "value": "Connection failed",
+      "address": "0x404340",
+      "instruction_ea": "0x40604C",
+      "instruction": "lea rdi, aConnFailed"
+    }
+  ],
+  "constant_arguments": [],
+  "internal_strings": ["Socket creation failed", "Connection failed"],
+  "caller_count": 1,
+  "caller_functions": ["sub_407000"],
+  "has_decompiled": true,
+  "real_name": "connect_to_server"
+}
